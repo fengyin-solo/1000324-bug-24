@@ -30,6 +30,12 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/stats")
+def stats() -> dict[str, int]:
+    """告警中心统计卡片：待确认告警与列表按状态过滤的条数同源，卡片和列表一起更新。"""
+    return service.stats()
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条告警事件明细；不存在时给出可读的错误说明。"""

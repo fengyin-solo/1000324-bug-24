@@ -43,6 +43,7 @@
               :key="action"
               class="link"
               type="button"
+              :disabled="acting"
               @click="runAction(action, row)"
             >
               {{ action }}
@@ -73,13 +74,14 @@ const ENDPOINT = '/api/alarm'
 const columns = ["告警编号", "告警类型", "告警等级", "触发设备", "触发时间", "确认人员", "处置说明", "告警状态"]
 const actions = ["确认告警", "处置告警", "忽略告警"]
 const statuses = ["待确认", "已确认", "已处置", "已忽略"]
-const stats = [{"label": "今日告警", "value": 0}, {"label": "待确认告警", "value": 0}, {"label": "高等级告警", "value": 0}]
 
 const rows = ref<Row[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const stats = ref([{ label: "今日告警", value: 0 }, { label: "待确认告警", value: 0 }, { label: "高等级告警", value: 0 }])
+const acting = ref(false)
 
 function resetFilters() {
   filters.value = {}
@@ -95,26 +97,54 @@ function openCreate() {
 }
 
 async function runAction(action: string, row: Row) {
+  if (acting.value) {
+    return
+  }
+  acting.value = true
   errorMessage.value = ''
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('告警中心动作未生效，请稍后重试')
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.message ?? '告警中心动作未生效，请稍后重试')
     }
-    await reload()
+    await Promise.all([reload(), loadStats()])
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '告警中心操作失败'
+  } finally {
+    acting.value = false
+  }
+}
+
+async function loadStats() {
+  try {
+    const response = await request(`${ENDPOINT}/stats`)
+    if (!response.ok) {
+      throw new Error('告警中心统计读取失败')
+    }
+    const payload = await response.json()
+    stats.value = [
+      { label: '今日告警', value: payload['今日告警'] ?? 0 },
+      { label: '待确认告警', value: payload['待确认告警'] ?? 0 },
+      { label: '高等级告警', value: payload['高等级告警'] ?? 0 },
+    ]
+  } catch {
+    // 统计读取失败时保留旧值，列表错误信息由 reload 统一展示
   }
 }
 
 async function reload() {
   errorMessage.value = ''
-  const query = new URLSearchParams(filters.value as Record<string, string>).toString()
+  const query = new URLSearchParams()
+  const keyword = (filters.value['告警编号'] ?? '').trim()
+  if (keyword) {
+    query.set('keyword', keyword)
+  }
   try {
-    const response = await request(`${ENDPOINT}?${query}`)
+    const response = await request(`${ENDPOINT}?${query.toString()}`)
     if (!response.ok) {
       throw new Error('告警事件列表读取失败')
     }
@@ -126,5 +156,8 @@ async function reload() {
   }
 }
 
-onMounted(reload)
+onMounted(() => {
+  void reload()
+  void loadStats()
+})
 </script>
