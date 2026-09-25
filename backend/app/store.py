@@ -8,12 +8,36 @@ from typing import Any
 
 from app.seed import SEED_ROWS
 
+# 告警中心的「待处理」只统计待确认事件，中文状态字段与内部标记在这里对齐，
+# 保证工作台卡片、列表状态过滤从同一口径读数。
+_ALARM_STATUS_FIELD = "告警状态"
+_ALARM_PENDING_STATUS = "待确认"
+_ALARM_IGNORED_STATUS = "已忽略"
+
+
+def _normalize_alarm(row: dict[str, Any]) -> None:
+    status = str(row.get(_ALARM_STATUS_FIELD) or row.get("status") or "").strip()
+    if status not in ("待确认", "已确认", "已处置", "已忽略"):
+        status = str(row.get("status") or _ALARM_PENDING_STATUS)
+    row["status"] = status
+    row[_ALARM_STATUS_FIELD] = status
+    row["pending"] = status == _ALARM_PENDING_STATUS
+    row["abnormal"] = status == _ALARM_IGNORED_STATUS
+
+
+_NORMALIZERS = {"alarm": _normalize_alarm}
+
 
 class Store:
     def __init__(self) -> None:
-        self._tables: dict[str, list[dict[str, Any]]] = {
-            name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
-        }
+        self._tables: dict[str, list[dict[str, Any]]] = {}
+        for name, rows in SEED_ROWS.items():
+            table = [dict(row) for row in rows]
+            normalize = _NORMALIZERS.get(name)
+            if normalize is not None:
+                for row in table:
+                    normalize(row)
+            self._tables[name] = table
 
     def module_names(self) -> list[str]:
         return sorted(self._tables)
